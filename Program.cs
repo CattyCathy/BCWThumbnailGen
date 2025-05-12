@@ -1,4 +1,4 @@
-﻿// See https://aka.ms/new-console-template for more information
+// See https://aka.ms/new-console-template for more information
 
 using System.Drawing;
 using System.Text.RegularExpressions;
@@ -48,11 +48,11 @@ class BCWThumbnailGen
 
             if (showFetchedItems)
                 Console.WriteLine("Fetched Dir: " + GetRelativePath(dirinfo.FullName));
-                            if (Directory.Exists(dirinfo.FullName))
-                {
-                    GetDirectories(new DirectoryInfo(dirinfo.FullName + "\\"));
-                    ProcessFiles(dirinfo);
-                }
+            if (Directory.Exists(dirinfo.FullName))
+            {
+                GetDirectories(new DirectoryInfo(dirinfo.FullName + "\\"));
+                ProcessFiles(dirinfo);
+            }
         }
     }
 
@@ -102,6 +102,7 @@ class BCWThumbnailGen
         string baseDir = Path.GetDirectoryName(file.FullName);
         List<string> TargetType = new List<string> { "galleryimg" };
         var targetImages = new List<string>();
+        bool HTMLUpdated = false;
         // 构建组合正则表达式模式
         string classPattern = "(?:" + string.Join("|", TargetType) + ")";
         string imgRegexPattern = $@"
@@ -125,6 +126,7 @@ class BCWThumbnailGen
         foreach (Match match in matches)
         {
             string src = match.Groups["src"].Value.Trim();
+
             string imgPath = Path.Combine(baseDir, src.Split(new[] { '?', '#' })[0]); // 清理URL参数和锚点
 
             if (!File.Exists(imgPath))
@@ -155,12 +157,15 @@ class BCWThumbnailGen
                 }
                 if (needCreateThumbnail)
                 {
-                    // 智能后缀替换
-                    src = Regex.Replace(src,
-                        @"\.png(?=\?|#|$)",
-                        ".webp",
-                        RegexOptions.IgnoreCase);
+                    string newSrc = Regex.Replace(src,
+                         @"\.png(?=\?|#|$)",
+                         ".webp",
+                         RegexOptions.IgnoreCase);
                     ProcessImg(new FileInfo(imgPath));
+                    htmlContent = htmlContent.Replace(
+                        match.Value,
+                        match.Value.Replace(src, newSrc));
+                    HTMLUpdated = true;
                 }
             }
             catch (OutOfMemoryException) // 专门捕获图像解析错误
@@ -177,13 +182,17 @@ class BCWThumbnailGen
             targetImages.Add(src);
         }
 
-        File.WriteAllText(file.FullName, htmlContent);
-        Console.WriteLine($"Updated File: {GetRelativePath(file.FullName)}");
+        if (HTMLUpdated)
+        {
+            File.WriteAllText(file.FullName, htmlContent);
+            Console.WriteLine($"Updated File: {GetRelativePath(file.FullName)}");
+        }
 
     }
 
     static void ProcessImg(FileInfo file)
     {
+        Console.WriteLine("Processing img");
         DirectoryInfo dirInfo = new(file.DirectoryName);
         bool haveImageSourceFolder = false;
         DirectoryInfo[] subFolders = dirInfo.GetDirectories();
