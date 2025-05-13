@@ -1,6 +1,8 @@
 // See https://aka.ms/new-console-template for more information
 
 using System.Drawing;
+using System.Linq;
+using System.Runtime;
 using System.Text.RegularExpressions;
 
 class BCWThumbnailGen
@@ -8,6 +10,7 @@ class BCWThumbnailGen
     //Config, set by user
     static string rootDir = Environment.CurrentDirectory;
     static bool showFetchedItems = false;
+    static bool showProcessingItems = false;
     static List<string> ignoreDirConfig = [".git", "profile", "gameitem"];
     static string sourceImgDirNameConfig = "imgsource";
     static int imgTargetWidthConfig = 700;
@@ -15,6 +18,9 @@ class BCWThumbnailGen
 
     //Processed Config, used by the program
     static List<string> ignoreDir = [];
+
+    //Generated data while rnning
+    static List<string> ProcessedImgs = [];
 
     static void Main(string[] args)
     {
@@ -30,6 +36,132 @@ class BCWThumbnailGen
         }
         ProcessAllDir();
         Console.WriteLine("Thumbnail generation finished.");
+        Console.WriteLine("Now applying new path to all <img> that not yet updated.");
+        UpdateImgPathAllDir();
+        Console.WriteLine("Process finished.");
+    }
+
+    public static void UpdateForHTMLSource(FileInfo file)
+    {
+        if (showProcessingItems)
+            Console.WriteLine($"HTML File: {GetRelativePath(file.FullName)}");
+        List<string> imgSources = [];
+        string htmlContent = System.IO.File.ReadAllText(file.FullName);
+        string baseDir = Path.GetDirectoryName(file.FullName);
+        var targetImages = new List<string>();
+        bool HTMLUpdated = false;
+        // 构建组合正则表达式模式
+        string classPattern = "(?:" + string.Join("|", TargetType) + ")";
+        string imgRegexPattern = @"<img\b[^>]*?\ssrc\s*=\s*['""](?<src>[^'""]+)['""][^>]*>";
+
+        var matches = Regex.Matches(
+            htmlContent,
+            imgRegexPattern,
+            RegexOptions.IgnoreCase | RegexOptions.IgnorePatternWhitespace | RegexOptions.Singleline
+        );
+
+        foreach (Match match in matches)
+        {
+            string src = match.Groups["src"].Value.Trim();
+
+            string imgPath = "";
+            if (imgPath.Length > 0 && new List<char>() { '/', '\\' }.Contains(src.Split(new[] { '?', '#' })[0][0]))
+            {
+                imgPath = new FileInfo(Path.Combine(rootDir, src.Split(new[] { '?', '#' })[0].Substring(1))).FullName; // 清理URL参数和锚点
+            }
+            else
+            {
+                imgPath = Path.Combine(baseDir, src.Split(new[] { '?', '#' })[0]);
+            }
+
+            if (!ProcessedImgs.Contains(imgPath))
+            {
+                continue;
+            }
+            if (!File.Exists(imgPath))
+            {
+                Console.WriteLine($"Image has been changed: {GetRelativePath(imgPath)}");
+            }
+
+            try
+            {
+                bool needUpdatePath = false;
+                string targetThumbnailFileFullName = Path.Combine(file.DirectoryName, Path.GetFileNameWithoutExtension(imgPath) + ".webp");
+                if (!File.Exists(imgPath) && !File.Exists(targetThumbnailFileFullName))
+                {
+                    Console.WriteLine($"Image and its thumbnail has been lost: {GetRelativePath(imgPath)}");
+                    continue;
+                }
+
+                if(new FileInfo(imgPath).FullName != targetThumbnailFileFullName)
+                    needUpdatePath = true;
+
+                if (needUpdatePath)
+                {
+                    string newSrc = Regex.Replace(src,
+                         @"\.png(?=\?|#|$)",
+                         ".webp",
+                         RegexOptions.IgnoreCase);
+                    ProcessImg(new FileInfo(imgPath));
+                    htmlContent = htmlContent.Replace(
+                        match.Value,
+                        match.Value.Replace(src, newSrc));
+                    HTMLUpdated = true;
+                    Console.WriteLine($"Applied: {src} -> {newSrc}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to update path: {ex.Message}");
+                continue;
+            }
+
+            targetImages.Add(src);
+        }
+
+        if (HTMLUpdated)
+        {
+            File.WriteAllText(file.FullName, htmlContent);
+            Console.WriteLine($"Updated File: {GetRelativePath(file.FullName)}");
+        }
+    }
+
+    public static void UpdateForDirectories(DirectoryInfo dirRoot)
+    {
+        DirectoryInfo[] dirList = dirRoot.GetDirectories();
+        foreach (DirectoryInfo dirinfo in dirList)
+        {
+            //To make all files updated, blacklist won't be used here.
+
+            if (showFetchedItems)
+                Console.WriteLine("Fetched Dir: " + GetRelativePath(dirinfo.FullName));
+            if (Directory.Exists(dirinfo.FullName))
+            {
+                UpdateForDirectories(new DirectoryInfo(dirinfo.FullName + "\\"));
+                UpdateForDirectoryFiles(dirinfo);
+            }
+        }
+    }
+
+    public static void UpdateForDirectoryFiles(DirectoryInfo dirinfo)
+    {
+        FileInfo[] files = dirinfo.GetFiles();
+        foreach (FileInfo file in files)
+        {
+            if (showFetchedItems == true)
+                Console.WriteLine("Fetched file: " + GetRelativePath(file.FullName));
+
+            if (file.Extension == ".html")
+            {
+                UpdateForHTMLSource(file);
+            }
+        }
+    }
+
+    public static void UpdateImgPathAllDir()
+    {
+        UpdateForDirectoryFiles(new DirectoryInfo(rootDir));
+        UpdateForDirectories(new DirectoryInfo(rootDir));
     }
 
     public static void ProcessAllDir()
@@ -99,6 +231,8 @@ class BCWThumbnailGen
 
     static void ProcessHTMLSource(FileInfo file)
     {
+        if (showProcessingItems)
+            Console.WriteLine($"Processing HTML: {GetRelativePath(file.FullName)}");
         List<string> imgSources = [];
         string htmlContent = System.IO.File.ReadAllText(file.FullName);
         string baseDir = Path.GetDirectoryName(file.FullName);
@@ -128,7 +262,15 @@ class BCWThumbnailGen
         {
             string src = match.Groups["src"].Value.Trim();
 
-            string imgPath = Path.Combine(baseDir, src.Split(new[] { '?', '#' })[0]); // 清理URL参数和锚点
+            string imgPath = "";
+            if (src.Split(new[] { '?', '#' })[0].Length > 0 && new List<char>() { '/', '\\' }.Contains(src.Split(new[] { '?', '#' })[0][0]))
+            {
+                imgPath = new FileInfo(Path.Combine(rootDir, src.Split(new[] { '?', '#' })[0].Substring(1))).FullName; // 清理URL参数和锚点
+            }
+            else
+            {
+                imgPath = Path.Combine(baseDir, src.Split(new[] { '?', '#' })[0]);
+            }
 
             if (!File.Exists(imgPath))
             {
@@ -193,7 +335,6 @@ class BCWThumbnailGen
 
     static void ProcessImg(FileInfo file)
     {
-        Console.WriteLine("Processing img");
         DirectoryInfo dirInfo = new(file.DirectoryName);
         bool haveImageSourceFolder = false;
         DirectoryInfo[] subFolders = dirInfo.GetDirectories();
@@ -260,6 +401,8 @@ class BCWThumbnailGen
                 }
 
                 string fileFullName = file.FullName;
+
+                ProcessedImgs.Add(file.FullName);
 
                 if (!sourceImgAlreadyExists)
                 {
