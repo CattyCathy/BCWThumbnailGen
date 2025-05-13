@@ -11,6 +11,7 @@ class BCWThumbnailGen
     static List<string> ignoreDirConfig = [".git", "profile", "gameitem"];
     static string sourceImgDirNameConfig = "imgsource";
     static int imgTargetWidthConfig = 700;
+    static List<string> TargetType = new List<string> { "fastimg" };
 
     //Processed Config, used by the program
     static List<string> ignoreDir = [];
@@ -28,6 +29,7 @@ class BCWThumbnailGen
             ignoreDir.Add(igdir.FullName);
         }
         ProcessAllDir();
+        Console.WriteLine("Thumbnail generation finished.");
     }
 
     public static void ProcessAllDir()
@@ -100,7 +102,6 @@ class BCWThumbnailGen
         List<string> imgSources = [];
         string htmlContent = System.IO.File.ReadAllText(file.FullName);
         string baseDir = Path.GetDirectoryName(file.FullName);
-        List<string> TargetType = new List<string> { "galleryimg" };
         var targetImages = new List<string>();
         bool HTMLUpdated = false;
         // 构建组合正则表达式模式
